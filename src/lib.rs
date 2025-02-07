@@ -1,1 +1,3 @@
-pub mod dlx;
+mod dlx;
+
+pub use dlx::*;
