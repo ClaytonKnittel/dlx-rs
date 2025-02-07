@@ -1172,6 +1172,27 @@ mod test {
   }
 
   #[test]
+  fn test_solve_partial_twice() {
+    let mut dlx = Dlx::new(
+      vec![
+        ('p', HeaderType::Primary),
+        ('q', HeaderType::Primary),
+        ('r', HeaderType::Primary),
+      ],
+      vec![
+        (0, vec!['p', 'q']),
+        (1, vec!['p', 'r']),
+        (2, vec!['p']),
+        (3, vec!['q']),
+      ],
+    );
+
+    let solution1 = dlx.find_solutions().next();
+    let solution2 = dlx.find_solutions().next();
+    assert_eq!(solution1, solution2);
+  }
+
+  #[test]
   fn test_simple_colors() {
     let mut dlx = Dlx::new(
       vec![
