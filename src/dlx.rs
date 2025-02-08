@@ -1003,8 +1003,16 @@ impl<I, N> Drop for DlxExplorer<'_, I, N> {
     // Undo all changes we've made to the data structure before dropping,
     // leaving it unmodified.
     self.partial_solution.iter().rev().for_each(|&p| {
-      self.dlx.uncover_remaining_choices(p);
-      self.dlx.uncover(self.dlx.to_top(p));
+      if let Node::Normal {
+        node_type: NodeType::Body { .. },
+        ..
+      } = self.dlx.node(p)
+      {
+        self.dlx.uncover_remaining_choices(p);
+        self.dlx.uncover(self.dlx.to_top(p));
+      } else {
+        self.dlx.uncover(p);
+      }
     });
   }
 }
@@ -1063,16 +1071,24 @@ where
       solution
         .iter()
         .fold(HashMap::new(), |secondary_assignments, &p| {
-          dlx
-            .items_for_node(p)
-            .fold(secondary_assignments, |mut secondary_assignments, c| {
-              if let Constraint::Secondary(ColorItem { item, color }) = c {
-                if let Some(prev_color) = secondary_assignments.insert(item, color) {
-                  debug_assert_eq!(color, prev_color);
+          if let Node::Normal {
+            node_type: NodeType::Body { .. },
+            ..
+          } = dlx.node(p)
+          {
+            dlx
+              .items_for_node(p)
+              .fold(secondary_assignments, |mut secondary_assignments, c| {
+                if let Constraint::Secondary(ColorItem { item, color }) = c {
+                  if let Some(prev_color) = secondary_assignments.insert(item, color) {
+                    debug_assert_eq!(color, prev_color);
+                  }
                 }
-              }
-              secondary_assignments
-            })
+                secondary_assignments
+              })
+          } else {
+            secondary_assignments
+          }
         })
     })
   }
@@ -1208,7 +1224,10 @@ where
 
 #[cfg(test)]
 mod test {
+  use googletest::gtest;
   use itertools::Itertools;
+
+  use googletest::prelude::*;
 
   use crate::{
     dlx::{ColorItem, Constraint},
@@ -1330,5 +1349,25 @@ mod test {
       .with_names()
       .next()
       .is_some_and(|solution| { solution.into_iter().sorted().eq(vec![0, 3].into_iter()) }));
+  }
+
+  #[gtest]
+  fn test_stepwise() {
+    let mut dlx = Dlx::new(
+      vec![
+        ('p', HeaderType::Primary),
+        ('q', HeaderType::Primary),
+        ('r', HeaderType::Primary),
+      ],
+      vec![
+        (0, vec!['p', 'q']),
+        (1, vec!['p', 'r']),
+        (2, vec!['p']),
+        (3, vec!['q']),
+      ],
+    );
+
+    let step1 = dlx.find_solutions_stepwise().with_names().next();
+    expect_that!(step1, some(eq(&vec![])));
   }
 }
