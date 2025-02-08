@@ -1033,7 +1033,17 @@ where
     self.mapped(|dlx, solution| {
       solution
         .into_iter()
-        .map(|p| dlx.set_name_for_node(p))
+        .filter_map(|p| {
+          if let Node::Normal {
+            node_type: NodeType::Body { .. },
+            ..
+          } = dlx.node(p)
+          {
+            Some(dlx.set_name_for_node(p))
+          } else {
+            None
+          }
+        })
         .collect()
     })
   }
