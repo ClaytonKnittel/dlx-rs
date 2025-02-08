@@ -1123,10 +1123,14 @@ impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
   type Item = Vec<usize>;
 
   fn next(&mut self) -> Option<Self::Item> {
-    match self.explorer.step() {
-      DlxStepResult::Continue => self.next(),
-      DlxStepResult::FoundSolution(solution) => Some(solution.clone()),
-      DlxStepResult::Done => None,
+    loop {
+      match self.explorer.step() {
+        DlxStepResult::Continue => {}
+        DlxStepResult::FoundSolution(solution) => {
+          return Some(solution.clone());
+        }
+        DlxStepResult::Done => return None,
+      }
     }
   }
 }
