@@ -698,8 +698,12 @@ impl<I, N> Dlx<I, N> {
     ExploreNextChoiceResult::Done
   }
 
-  fn find_solutions(&mut self) -> impl DlxIterator<I, N> + '_ {
+  pub fn find_solutions(&mut self) -> impl DlxIterator<I, N> + '_ {
     DlxIteratorImpl::new(self)
+  }
+
+  pub fn find_solutions_stepwise(&mut self) -> impl DlxIterator<I, N> + '_ {
+    StepwiseDlxIteratorImpl::new(self)
   }
 }
 
@@ -738,31 +742,6 @@ where
 
 impl<I, N> Dlx<I, N>
 where
-  I: Clone + Eq + Hash,
-{
-  pub fn find_solution_colors(&mut self) -> Option<HashMap<I, u32>> {
-    let solution = self.find_solutions().next();
-    solution.map(|solution| {
-      solution
-        .iter()
-        .fold(HashMap::new(), |secondary_assignments, &p| {
-          self
-            .items_for_node(p)
-            .fold(secondary_assignments, |mut secondary_assignments, c| {
-              if let Constraint::Secondary(ColorItem { item, color }) = c {
-                if let Some(prev_color) = secondary_assignments.insert(item, color) {
-                  debug_assert_eq!(color, prev_color);
-                }
-              }
-              secondary_assignments
-            })
-        })
-    })
-  }
-}
-
-impl<I, N> Dlx<I, N>
-where
   N: Clone,
 {
   fn set_name_for_node(&self, idx: usize) -> N {
@@ -772,15 +751,6 @@ where
         Node::Normal { .. } => None,
       })
       .unwrap()
-  }
-
-  pub fn find_solution_names(&mut self) -> impl Iterator<Item = Vec<N>> + '_ {
-    self.find_solutions().mapped(|dlx, solution| {
-      solution
-        .into_iter()
-        .map(|p| dlx.set_name_for_node(p))
-        .collect()
-    })
   }
 }
 
@@ -979,6 +949,66 @@ where
   }
 }
 
+enum DlxStepResult<'a> {
+  Continue,
+  FoundSolution(&'a Vec<usize>),
+  Done,
+}
+
+#[derive(Debug)]
+struct DlxExplorer<'a, I, N> {
+  dlx: &'a mut Dlx<I, N>,
+  partial_solution: Vec<usize>,
+}
+
+impl<'a, I, N> DlxExplorer<'a, I, N> {
+  fn new(dlx: &'a mut Dlx<I, N>) -> Self {
+    Self {
+      dlx,
+      partial_solution: Vec::new(),
+    }
+  }
+
+  fn dlx(&self) -> &Dlx<I, N> {
+    self.dlx
+  }
+
+  fn partial_solution(&self) -> &Vec<usize> {
+    &self.partial_solution
+  }
+
+  fn step(&mut self) -> DlxStepResult<'_> {
+    // This should only be false the very first call to `next()`, or if
+    // `next()` is called after `None` is returned at the end of iteration.
+    if !self.partial_solution.is_empty() {
+      if let ExploreNextChoiceResult::Done =
+        self.dlx.explore_next_choice(&mut self.partial_solution)
+      {
+        return DlxStepResult::Done;
+      }
+    }
+
+    if let ChooseNextItemResult::FoundSolution =
+      self.dlx.choose_next_item(&mut self.partial_solution)
+    {
+      return DlxStepResult::FoundSolution(&self.partial_solution);
+    }
+
+    DlxStepResult::Continue
+  }
+}
+
+impl<I, N> Drop for DlxExplorer<'_, I, N> {
+  fn drop(&mut self) {
+    // Undo all changes we've made to the data structure before dropping,
+    // leaving it unmodified.
+    self.partial_solution.iter().rev().for_each(|&p| {
+      self.dlx.uncover_remaining_choices(p);
+      self.dlx.uncover(self.dlx.to_top(p));
+    });
+  }
+}
+
 pub trait DlxIterator<I, N, R = Vec<usize>>: Iterator<Item = R> + Sized {
   fn dlx(&self) -> &Dlx<I, N>;
 
@@ -990,18 +1020,76 @@ pub trait DlxIterator<I, N, R = Vec<usize>>: Iterator<Item = R> + Sized {
   }
 }
 
+pub trait DlxIteratorWithNames<I, N> {
+  fn with_names(self) -> impl DlxIterator<I, N, Vec<N>>;
+}
+
+impl<D, I, N> DlxIteratorWithNames<I, N> for D
+where
+  D: DlxIterator<I, N, Vec<usize>>,
+  N: Clone,
+{
+  fn with_names(self) -> impl DlxIterator<I, N, Vec<N>> {
+    self.mapped(|dlx, solution| {
+      solution
+        .into_iter()
+        .map(|p| dlx.set_name_for_node(p))
+        .collect()
+    })
+  }
+}
+
+pub trait DlxIteratorWithColors<I, N> {
+  fn with_colors(self) -> impl DlxIterator<I, N, HashMap<I, u32>>;
+}
+
+impl<D, I, N> DlxIteratorWithColors<I, N> for D
+where
+  D: DlxIterator<I, N, Vec<usize>>,
+  I: Clone + Eq + Hash,
+{
+  fn with_colors(self) -> impl DlxIterator<I, N, HashMap<I, u32>> {
+    self.mapped(|dlx, solution| {
+      solution
+        .iter()
+        .fold(HashMap::new(), |secondary_assignments, &p| {
+          dlx
+            .items_for_node(p)
+            .fold(secondary_assignments, |mut secondary_assignments, c| {
+              if let Constraint::Secondary(ColorItem { item, color }) = c {
+                if let Some(prev_color) = secondary_assignments.insert(item, color) {
+                  debug_assert_eq!(color, prev_color);
+                }
+              }
+              secondary_assignments
+            })
+        })
+    })
+  }
+}
+
 #[derive(Debug)]
 pub struct DlxIteratorImpl<'a, I, N> {
-  dlx: &'a mut Dlx<I, N>,
-  partial_solution: Vec<usize>,
+  explorer: DlxExplorer<'a, I, N>,
 }
 
 impl<'a, I, N> DlxIteratorImpl<'a, I, N> {
   fn new(dlx: &'a mut Dlx<I, N>) -> Self {
     Self {
-      dlx,
-      partial_solution: Vec::new(),
+      explorer: DlxExplorer::new(dlx),
     }
+  }
+
+  pub fn with_names(self) -> impl DlxIterator<I, N, Vec<N>> + 'a
+  where
+    N: Clone,
+  {
+    self.mapped(|dlx, solution| {
+      solution
+        .into_iter()
+        .map(|p| dlx.set_name_for_node(p))
+        .collect()
+    })
   }
 }
 
@@ -1010,21 +1098,12 @@ impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
 
   fn next(&mut self) -> Option<Self::Item> {
     loop {
-      // This should only be false the very first call to `next()`, or if
-      // `next()` is called after `None` is returned to indicate end of
-      // iteration.
-      if !self.partial_solution.is_empty() {
-        if let ExploreNextChoiceResult::Done =
-          self.dlx.explore_next_choice(&mut self.partial_solution)
-        {
-          return None;
+      match self.explorer.step() {
+        DlxStepResult::Continue => {}
+        DlxStepResult::FoundSolution(solution) => {
+          return Some(solution.clone());
         }
-      }
-
-      if let ChooseNextItemResult::FoundSolution =
-        self.dlx.choose_next_item(&mut self.partial_solution)
-      {
-        return Some(self.partial_solution.clone());
+        DlxStepResult::Done => return None,
       }
     }
   }
@@ -1032,18 +1111,38 @@ impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
 
 impl<I, N> DlxIterator<I, N, Vec<usize>> for DlxIteratorImpl<'_, I, N> {
   fn dlx(&self) -> &Dlx<I, N> {
-    self.dlx
+    self.explorer.dlx()
   }
 }
 
-impl<I, N> Drop for DlxIteratorImpl<'_, I, N> {
-  fn drop(&mut self) {
-    // Undo all changes we've made to the data structure before dropping,
-    // leaving it unmodified.
-    self.partial_solution.iter().rev().for_each(|&p| {
-      self.dlx.uncover_remaining_choices(p);
-      self.dlx.uncover(self.dlx.to_top(p));
-    });
+#[derive(Debug)]
+pub struct StepwiseDlxIteratorImpl<'a, I, N> {
+  explorer: DlxExplorer<'a, I, N>,
+}
+
+impl<'a, I, N> StepwiseDlxIteratorImpl<'a, I, N> {
+  fn new(dlx: &'a mut Dlx<I, N>) -> Self {
+    Self {
+      explorer: DlxExplorer::new(dlx),
+    }
+  }
+}
+
+impl<I, N> Iterator for StepwiseDlxIteratorImpl<'_, I, N> {
+  type Item = Vec<usize>;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    match self.explorer.step() {
+      DlxStepResult::Continue => Some(self.explorer.partial_solution().clone()),
+      DlxStepResult::FoundSolution(solution) => Some(solution.clone()),
+      DlxStepResult::Done => None,
+    }
+  }
+}
+
+impl<I, N> DlxIterator<I, N, Vec<usize>> for StepwiseDlxIteratorImpl<'_, I, N> {
+  fn dlx(&self) -> &Dlx<I, N> {
+    self.explorer.dlx()
   }
 }
 
@@ -1101,7 +1200,10 @@ where
 mod test {
   use itertools::Itertools;
 
-  use crate::dlx::{ColorItem, Constraint};
+  use crate::{
+    dlx::{ColorItem, Constraint},
+    DlxIteratorWithNames,
+  };
 
   use super::{Dlx, HeaderType};
 
@@ -1120,7 +1222,8 @@ mod test {
     let mut dlx = Dlx::new(vec![(1, HeaderType::Primary)], vec![(0, vec![1])]);
 
     assert!(dlx
-      .find_solution_names()
+      .find_solutions()
+      .with_names()
       .next()
       .is_some_and(|solution| solution.eq(&vec![0])));
   }
@@ -1142,7 +1245,8 @@ mod test {
     );
 
     assert!(dlx
-      .find_solution_names()
+      .find_solutions()
+      .with_names()
       .next()
       .is_some_and(|mut solution| {
         solution.sort();
@@ -1212,7 +1316,8 @@ mod test {
     );
 
     assert!(dlx
-      .find_solution_names()
+      .find_solutions()
+      .with_names()
       .next()
       .is_some_and(|solution| { solution.into_iter().sorted().eq(vec![0, 3].into_iter()) }));
   }
