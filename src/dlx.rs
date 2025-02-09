@@ -710,7 +710,9 @@ impl<I, N> Dlx<I, N> {
     DlxIteratorImpl::new(self)
   }
 
-  pub fn find_solutions_stepwise(&mut self) -> impl DlxIterator<I, N> + '_ {
+  pub fn find_solutions_stepwise(
+    &mut self,
+  ) -> impl DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>> + '_ {
     StepwiseDlxIteratorImpl::new(self)
   }
 }
@@ -1036,8 +1038,8 @@ pub trait DlxIterator<I, N, R = Vec<usize>>: Iterator<Item = R> + Sized {
   }
 }
 
-pub trait DlxIteratorWithNames<I, N> {
-  fn with_names(self) -> impl DlxIterator<I, N, Vec<N>>;
+pub trait DlxIteratorWithNames<I, N, R = Vec<N>> {
+  fn with_names(self) -> impl DlxIterator<I, N, R>;
 }
 
 impl<D, I, N> DlxIteratorWithNames<I, N> for D
@@ -1061,6 +1063,42 @@ where
           }
         })
         .collect()
+    })
+  }
+}
+
+impl<D, I, N> DlxIteratorWithNames<I, N, StepwiseDlxIterResult<Vec<N>>> for D
+where
+  D: DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>>,
+  N: Clone,
+{
+  fn with_names(self) -> impl DlxIterator<I, N, StepwiseDlxIterResult<Vec<N>>> {
+    self.mapped(|dlx, solution| {
+      let is_step = matches!(solution, StepwiseDlxIterResult::Step(_));
+      let solution_vec = match solution {
+        StepwiseDlxIterResult::Step(solution) | StepwiseDlxIterResult::Solution(solution) => {
+          solution
+            .into_iter()
+            .filter_map(|p| {
+              if let Node::Normal {
+                node_type: NodeType::Body { .. },
+                ..
+              } = dlx.node(p)
+              {
+                Some(dlx.set_name_for_node(p))
+              } else {
+                None
+              }
+            })
+            .collect()
+        }
+      };
+
+      if is_step {
+        StepwiseDlxIterResult::Step(solution_vec)
+      } else {
+        StepwiseDlxIterResult::Solution(solution_vec)
+      }
     })
   }
 }
@@ -1114,17 +1152,17 @@ impl<'a, I, N> DlxIteratorImpl<'a, I, N> {
     }
   }
 
-  pub fn with_names(self) -> impl DlxIterator<I, N, Vec<N>> + 'a
-  where
-    N: Clone,
-  {
-    self.mapped(|dlx, solution| {
-      solution
-        .into_iter()
-        .map(|p| dlx.set_name_for_node(p))
-        .collect()
-    })
-  }
+  // pub fn with_names(self) -> impl DlxIterator<I, N, Vec<N>> + 'a
+  // where
+  //   N: Clone,
+  // {
+  //   self.mapped(|dlx, solution| {
+  //     solution
+  //       .into_iter()
+  //       .map(|p| dlx.set_name_for_node(p))
+  //       .collect()
+  //   })
+  // }
 }
 
 impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
@@ -1149,6 +1187,14 @@ impl<I, N> DlxIterator<I, N, Vec<usize>> for DlxIteratorImpl<'_, I, N> {
   }
 }
 
+#[derive(Clone, Debug)]
+pub enum StepwiseDlxIterResult<T> {
+  /// This is a partial solution to the DLX problem.
+  Step(T),
+  /// This is a complete solution to the DLX problem.
+  Solution(T),
+}
+
 #[derive(Debug)]
 pub struct StepwiseDlxIteratorImpl<'a, I, N> {
   explorer: DlxExplorer<'a, I, N>,
@@ -1163,18 +1209,24 @@ impl<'a, I, N> StepwiseDlxIteratorImpl<'a, I, N> {
 }
 
 impl<I, N> Iterator for StepwiseDlxIteratorImpl<'_, I, N> {
-  type Item = Vec<usize>;
+  type Item = StepwiseDlxIterResult<Vec<usize>>;
 
   fn next(&mut self) -> Option<Self::Item> {
     match self.explorer.step() {
-      DlxStepResult::Continue => Some(self.explorer.partial_solution().clone()),
-      DlxStepResult::FoundSolution(solution) => Some(solution.clone()),
+      DlxStepResult::Continue => Some(StepwiseDlxIterResult::Step(
+        self.explorer.partial_solution().clone(),
+      )),
+      DlxStepResult::FoundSolution(solution) => {
+        Some(StepwiseDlxIterResult::Solution(solution.clone()))
+      }
       DlxStepResult::Done => None,
     }
   }
 }
 
-impl<I, N> DlxIterator<I, N, Vec<usize>> for StepwiseDlxIteratorImpl<'_, I, N> {
+impl<I, N> DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>>
+  for StepwiseDlxIteratorImpl<'_, I, N>
+{
   fn dlx(&self) -> &Dlx<I, N> {
     self.explorer.dlx()
   }
@@ -1239,7 +1291,7 @@ mod test {
 
   use crate::{
     dlx::{ColorItem, Constraint},
-    DlxIteratorWithNames,
+    DlxIteratorWithNames, StepwiseDlxIterResult,
   };
 
   use super::{Dlx, HeaderType};
@@ -1375,7 +1427,55 @@ mod test {
       ],
     );
 
-    let step1 = dlx.find_solutions_stepwise().with_names().next();
-    expect_that!(step1, some(eq(&vec![])));
+    let mut stepwise_iter = dlx.find_solutions_stepwise().with_names();
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Step(elements_are![])))
+    );
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Step(elements_are![&1])))
+    );
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Solution(elements_are![&1, &3])))
+    );
+    assert_that!(stepwise_iter.next(), none());
+  }
+
+  #[gtest]
+  fn test_stepwise_two_solutions() {
+    let mut dlx = Dlx::new(
+      vec![
+        ('p', HeaderType::Primary),
+        ('q', HeaderType::Primary),
+        ('r', HeaderType::Primary),
+      ],
+      vec![
+        (0, vec!['p', 'q']),
+        (1, vec!['p']),
+        (2, vec!['p', 'q']),
+        (3, vec!['r']),
+      ],
+    );
+
+    let mut stepwise_iter = dlx.find_solutions_stepwise().with_names();
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Step(elements_are![])))
+    );
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Step(elements_are![&3])))
+    );
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Solution(elements_are![&3, &0])))
+    );
+    assert_that!(
+      stepwise_iter.next(),
+      some(pat!(StepwiseDlxIterResult::Solution(elements_are![&3, &2])))
+    );
+    assert_that!(stepwise_iter.next(), none());
   }
 }
