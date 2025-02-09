@@ -654,58 +654,6 @@ impl<I, N> Dlx<I, N> {
     best_opt.0
   }
 
-  #[must_use]
-  fn choose_next_item(&mut self, solution: &mut Vec<usize>) -> ChooseNextItemResult {
-    match self.choose_item() {
-      Some(item) => {
-        let item = item as usize;
-        solution.push(item);
-        self.cover(item);
-        ChooseNextItemResult::Continue
-      }
-      None => ChooseNextItemResult::FoundSolution,
-    }
-  }
-
-  #[must_use]
-  fn explore_next_choice(&mut self, solution: &mut Vec<usize>) -> ExploreNextChoiceResult {
-    while let Some(p) = solution.pop() {
-      if let Node::Normal {
-        node_type: NodeType::Body { .. },
-        ..
-      } = self.node(p)
-      {
-        self.uncover_remaining_choices(p);
-      }
-
-      // Try exploring the next choice.
-      let p = self.node(p).next();
-
-      match self.node(p) {
-        Node::Normal {
-          node_type: NodeType::Header { .. },
-          ..
-        } => {
-          // We have exhausted all options under this item, so continue to the
-          // previous item.
-          self.uncover(p);
-        }
-        Node::Normal {
-          node_type: NodeType::Body { .. },
-          ..
-        } => {
-          // We can try exploring this subset.
-          solution.push(p);
-          self.cover_remaining_choices(p);
-          return ExploreNextChoiceResult::Continue;
-        }
-        Node::Boundary { .. } => dlx_unreachable!("Unexpected boundary node found in queue: {p}"),
-      }
-    }
-
-    ExploreNextChoiceResult::Done
-  }
-
   pub fn find_solutions(&mut self) -> impl DlxIterator<I, N> + '_ {
     DlxIteratorImpl::new(self)
   }
@@ -987,20 +935,72 @@ impl<'a, I, N> DlxExplorer<'a, I, N> {
     &self.partial_solution
   }
 
+  #[must_use]
+  fn choose_next_item(&mut self) -> ChooseNextItemResult {
+    let dlx = &mut self.dlx;
+
+    match dlx.choose_item() {
+      Some(item) => {
+        let item = item as usize;
+        self.partial_solution.push(item);
+        dlx.cover(item);
+        ChooseNextItemResult::Continue
+      }
+      None => ChooseNextItemResult::FoundSolution,
+    }
+  }
+
+  #[must_use]
+  fn explore_next_choice(&mut self) -> ExploreNextChoiceResult {
+    let dlx = &mut self.dlx;
+
+    while let Some(p) = self.partial_solution.pop() {
+      if let Node::Normal {
+        node_type: NodeType::Body { .. },
+        ..
+      } = dlx.node(p)
+      {
+        dlx.uncover_remaining_choices(p);
+      }
+
+      // Try exploring the next choice.
+      let p = dlx.node(p).next();
+
+      match dlx.node(p) {
+        Node::Normal {
+          node_type: NodeType::Header { .. },
+          ..
+        } => {
+          // We have exhausted all options under this item, so continue to the
+          // previous item.
+          dlx.uncover(p);
+        }
+        Node::Normal {
+          node_type: NodeType::Body { .. },
+          ..
+        } => {
+          // We can try exploring this subset.
+          self.partial_solution.push(p);
+          dlx.cover_remaining_choices(p);
+          return ExploreNextChoiceResult::Continue;
+        }
+        Node::Boundary { .. } => dlx_unreachable!("Unexpected boundary node found in queue: {p}"),
+      }
+    }
+
+    ExploreNextChoiceResult::Done
+  }
+
   fn step(&mut self) -> DlxStepResult<'_> {
     // This should only be false the very first call to `next()`, or if
     // `next()` is called after `None` is returned at the end of iteration.
     if !self.partial_solution.is_empty() {
-      if let ExploreNextChoiceResult::Done =
-        self.dlx.explore_next_choice(&mut self.partial_solution)
-      {
+      if let ExploreNextChoiceResult::Done = self.explore_next_choice() {
         return DlxStepResult::Done;
       }
     }
 
-    if let ChooseNextItemResult::FoundSolution =
-      self.dlx.choose_next_item(&mut self.partial_solution)
-    {
+    if let ChooseNextItemResult::FoundSolution = self.choose_next_item() {
       return DlxStepResult::FoundSolution(&self.partial_solution);
     }
 
