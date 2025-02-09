@@ -1151,18 +1151,6 @@ impl<'a, I, N> DlxIteratorImpl<'a, I, N> {
       explorer: DlxExplorer::new(dlx),
     }
   }
-
-  // pub fn with_names(self) -> impl DlxIterator<I, N, Vec<N>> + 'a
-  // where
-  //   N: Clone,
-  // {
-  //   self.mapped(|dlx, solution| {
-  //     solution
-  //       .into_iter()
-  //       .map(|p| dlx.set_name_for_node(p))
-  //       .collect()
-  //   })
-  // }
 }
 
 impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
