@@ -37,6 +37,10 @@ impl<I> ColorItem<I> {
   pub fn item(&self) -> &I {
     &self.item
   }
+
+  pub fn color(&self) -> u32 {
+    self.color
+  }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
