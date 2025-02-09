@@ -33,6 +33,10 @@ impl<I> ColorItem<I> {
   pub fn new(item: I, color: u32) -> Self {
     ColorItem { item, color }
   }
+
+  pub fn item(&self) -> &I {
+    &self.item
+  }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
