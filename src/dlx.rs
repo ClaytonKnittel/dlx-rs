@@ -1195,6 +1195,14 @@ pub enum StepwiseDlxIterResult<T> {
   Solution(T),
 }
 
+impl<T> StepwiseDlxIterResult<T> {
+  pub fn result(&self) -> &T {
+    match self {
+      Self::Step(result) | Self::Solution(result) => result,
+    }
+  }
+}
+
 #[derive(Debug)]
 pub struct StepwiseDlxIteratorImpl<'a, I, N> {
   explorer: DlxExplorer<'a, I, N>,
