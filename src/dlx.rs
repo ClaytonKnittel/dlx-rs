@@ -1196,6 +1196,12 @@ pub enum StepwiseDlxIterResult<T> {
 }
 
 impl<T> StepwiseDlxIterResult<T> {
+  pub fn take_result(self) -> T {
+    match self {
+      Self::Step(result) | Self::Solution(result) => result,
+    }
+  }
+
   pub fn result(&self) -> &T {
     match self {
       Self::Step(result) | Self::Solution(result) => result,
