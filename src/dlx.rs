@@ -23,7 +23,7 @@ macro_rules! dlx_unreachable {
   };
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ColorItem<I> {
   item: I,
   color: u32,
@@ -43,7 +43,7 @@ impl<I> ColorItem<I> {
   }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Constraint<I> {
   Primary(I),
   Secondary(ColorItem<I>),
