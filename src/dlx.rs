@@ -394,7 +394,7 @@ impl<I, N> Dlx<I, N> {
 
   /// Remove the subset containing the node at `idx` from the grid.
   fn hide(&mut self, idx: usize) {
-    let mut q = idx + 1;
+    let mut q = idx.wrapping_add(1);
     while q != idx {
       match self.body_node(q) {
         Node::Boundary { first_for_prev, .. } => {
@@ -412,8 +412,9 @@ impl<I, N> Dlx<I, N> {
             self.node_mut(prev_idx).set_next(next_idx);
             self.node_mut(next_idx).set_prev(prev_idx);
           }
-          *self.body_header_mut(top).len_mut() -= 1;
-          q += 1;
+          let len_mut = self.body_header_mut(top).len_mut();
+          *len_mut = len_mut.wrapping_sub(1);
+          q = q.wrapping_add(1);
         }
         Node::Normal {
           node_type: NodeType::Header { .. },
@@ -426,7 +427,7 @@ impl<I, N> Dlx<I, N> {
   /// Reverts `hide(idx)`, assuming the state of Dlx was exactly as it was when
   /// `hide(idx)` was called.
   fn unhide(&mut self, idx: usize) {
-    let mut q = idx - 1;
+    let mut q = idx.wrapping_sub(1);
     while q != idx {
       match self.body_node(q) {
         Node::Boundary { last_for_next, .. } => {
@@ -444,8 +445,9 @@ impl<I, N> Dlx<I, N> {
             self.node_mut(prev_idx).set_next(q);
             self.node_mut(next_idx).set_prev(q);
           }
-          *self.body_header_mut(top).len_mut() += 1;
-          q -= 1;
+          let len_mut = self.body_header_mut(top).len_mut();
+          *len_mut = len_mut.wrapping_add(1);
+          q = q.wrapping_sub(1);
         }
         Node::Normal {
           node_type: NodeType::Header { .. },
@@ -576,7 +578,7 @@ impl<I, N> Dlx<I, N> {
   /// Covers all other items take by the subset containing the node at `idx`.
   fn cover_remaining_choices(&mut self, idx: usize) {
     // println!("Covering remaining for {idx}");
-    let mut p = idx + 1;
+    let mut p = idx.wrapping_add(1);
     while p != idx {
       match self.body_node(p) {
         Node::Boundary { first_for_prev, .. } => {
@@ -587,7 +589,7 @@ impl<I, N> Dlx<I, N> {
           ..
         } => {
           self.commit(p, *top as usize);
-          p += 1;
+          p = p.wrapping_add(1);
         }
         Node::Normal {
           node_type: NodeType::Header { .. },
@@ -603,7 +605,7 @@ impl<I, N> Dlx<I, N> {
 
   /// Covers all other items take by the subset containing the node at `idx`.
   fn uncover_remaining_choices(&mut self, idx: usize) {
-    let mut p = idx - 1;
+    let mut p = idx.wrapping_sub(1);
     while p != idx {
       match self.body_node(p) {
         Node::Boundary { last_for_next, .. } => {
@@ -614,7 +616,7 @@ impl<I, N> Dlx<I, N> {
           ..
         } => {
           self.uncommit(p, *top as usize);
-          p -= 1;
+          p = p.wrapping_sub(1);
         }
         Node::Normal {
           node_type: NodeType::Header { .. },
