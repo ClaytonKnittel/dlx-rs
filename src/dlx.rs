@@ -1,4 +1,5 @@
 use std::{
+  borrow::BorrowMut,
   collections::{HashMap, HashSet},
   fmt::{self, Debug, Formatter},
   hash::Hash,
@@ -916,36 +917,48 @@ enum DlxStepResult<'a> {
 }
 
 #[derive(Debug)]
-struct DlxExplorer<'a, I, N> {
-  dlx: &'a mut Dlx<I, N>,
+struct DlxExplorer<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  dlx: D,
   partial_solution: Vec<usize>,
+  _phantom: PhantomData<(I, N)>,
 }
 
-impl<'a, I, N> DlxExplorer<'a, I, N> {
-  fn new(dlx: &'a mut Dlx<I, N>) -> Self {
+impl<D, I, N> DlxExplorer<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  fn new(dlx: D) -> Self {
     Self {
       dlx,
       partial_solution: Vec::new(),
+      _phantom: PhantomData,
     }
-  }
-
-  fn dlx(&self) -> &Dlx<I, N> {
-    self.dlx
   }
 
   fn partial_solution(&self) -> &Vec<usize> {
     &self.partial_solution
   }
 
+  fn dlx(&self) -> &Dlx<I, N> {
+    self.dlx.borrow()
+  }
+
+  fn dlx_mut(&mut self) -> &mut Dlx<I, N> {
+    self.dlx.borrow_mut()
+  }
+
   #[must_use]
   fn choose_next_item(&mut self) -> ChooseNextItemResult {
-    let dlx = &mut self.dlx;
+    let dlx = self.dlx_mut();
 
     match dlx.choose_item() {
       Some(item) => {
         let item = item as usize;
-        self.partial_solution.push(item);
         dlx.cover(item);
+        self.partial_solution.push(item);
         ChooseNextItemResult::Continue
       }
       None => ChooseNextItemResult::FoundSolution,
@@ -954,9 +967,9 @@ impl<'a, I, N> DlxExplorer<'a, I, N> {
 
   #[must_use]
   fn explore_next_choice(&mut self) -> ExploreNextChoiceResult {
-    let dlx = &mut self.dlx;
-
     while let Some(p) = self.partial_solution.pop() {
+      let dlx = self.dlx_mut();
+
       if let Node::Normal {
         node_type: NodeType::Body { .. },
         ..
@@ -982,8 +995,8 @@ impl<'a, I, N> DlxExplorer<'a, I, N> {
           ..
         } => {
           // We can try exploring this subset.
-          self.partial_solution.push(p);
           dlx.cover_remaining_choices(p);
+          self.partial_solution.push(p);
           return ExploreNextChoiceResult::Continue;
         }
         Node::Boundary { .. } => dlx_unreachable!("Unexpected boundary node found in queue: {p}"),
@@ -1010,20 +1023,24 @@ impl<'a, I, N> DlxExplorer<'a, I, N> {
   }
 }
 
-impl<I, N> Drop for DlxExplorer<'_, I, N> {
+impl<D, I, N> Drop for DlxExplorer<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
   fn drop(&mut self) {
     // Undo all changes we've made to the data structure before dropping,
     // leaving it unmodified.
-    self.partial_solution.iter().rev().for_each(|&p| {
+    self.partial_solution.clone().iter().rev().for_each(|&p| {
+      let dlx = self.dlx_mut();
       if let Node::Normal {
         node_type: NodeType::Body { .. },
         ..
-      } = self.dlx.node(p)
+      } = dlx.node(p)
       {
-        self.dlx.uncover_remaining_choices(p);
-        self.dlx.uncover(self.dlx.to_top(p));
+        dlx.uncover_remaining_choices(p);
+        dlx.uncover(dlx.to_top(p));
       } else {
-        self.dlx.uncover(p);
+        dlx.uncover(p);
       }
     });
   }
@@ -1143,19 +1160,28 @@ where
 }
 
 #[derive(Debug)]
-pub struct DlxIteratorImpl<'a, I, N> {
-  explorer: DlxExplorer<'a, I, N>,
+pub struct DlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  explorer: DlxExplorer<D, I, N>,
 }
 
-impl<'a, I, N> DlxIteratorImpl<'a, I, N> {
-  fn new(dlx: &'a mut Dlx<I, N>) -> Self {
+impl<D, I, N> DlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  fn new(dlx: D) -> Self {
     Self {
       explorer: DlxExplorer::new(dlx),
     }
   }
 }
 
-impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
+impl<D, I, N> Iterator for DlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
   type Item = Vec<usize>;
 
   fn next(&mut self) -> Option<Self::Item> {
@@ -1171,7 +1197,10 @@ impl<I, N> Iterator for DlxIteratorImpl<'_, I, N> {
   }
 }
 
-impl<I, N> DlxIterator<I, N, Vec<usize>> for DlxIteratorImpl<'_, I, N> {
+impl<D, I, N> DlxIterator<I, N, Vec<usize>> for DlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
   fn dlx(&self) -> &Dlx<I, N> {
     self.explorer.dlx()
   }
@@ -1200,19 +1229,28 @@ impl<T> StepwiseDlxIterResult<T> {
 }
 
 #[derive(Debug)]
-pub struct StepwiseDlxIteratorImpl<'a, I, N> {
-  explorer: DlxExplorer<'a, I, N>,
+pub struct StepwiseDlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  explorer: DlxExplorer<D, I, N>,
 }
 
-impl<'a, I, N> StepwiseDlxIteratorImpl<'a, I, N> {
-  fn new(dlx: &'a mut Dlx<I, N>) -> Self {
+impl<D, I, N> StepwiseDlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
+  fn new(dlx: D) -> Self {
     Self {
       explorer: DlxExplorer::new(dlx),
     }
   }
 }
 
-impl<I, N> Iterator for StepwiseDlxIteratorImpl<'_, I, N> {
+impl<D, I, N> Iterator for StepwiseDlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
+{
   type Item = StepwiseDlxIterResult<Vec<usize>>;
 
   fn next(&mut self) -> Option<Self::Item> {
@@ -1228,8 +1266,10 @@ impl<I, N> Iterator for StepwiseDlxIteratorImpl<'_, I, N> {
   }
 }
 
-impl<I, N> DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>>
-  for StepwiseDlxIteratorImpl<'_, I, N>
+impl<D, I, N> DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>>
+  for StepwiseDlxIteratorImpl<D, I, N>
+where
+  D: BorrowMut<Dlx<I, N>>,
 {
   fn dlx(&self) -> &Dlx<I, N> {
     self.explorer.dlx()
