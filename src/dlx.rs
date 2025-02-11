@@ -661,9 +661,19 @@ impl<I, N> Dlx<I, N> {
     DlxIteratorImpl::new(self)
   }
 
+  pub fn find_solutions_owned(self) -> impl DlxIterator<I, N> {
+    DlxIteratorImpl::new(self)
+  }
+
   pub fn find_solutions_stepwise(
     &mut self,
   ) -> impl DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>> + '_ {
+    StepwiseDlxIteratorImpl::new(self)
+  }
+
+  pub fn find_solutions_stepwise_owned(
+    self,
+  ) -> impl DlxIterator<I, N, StepwiseDlxIterResult<Vec<usize>>> {
     StepwiseDlxIteratorImpl::new(self)
   }
 }
