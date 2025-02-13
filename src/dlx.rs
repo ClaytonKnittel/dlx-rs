@@ -927,12 +927,19 @@ enum DlxStepResult<'a> {
 }
 
 #[derive(Debug)]
+enum DlxExplorerState {
+  Started,
+  NotStarted,
+}
+
+#[derive(Debug)]
 struct DlxExplorer<D, I, N>
 where
   D: BorrowMut<Dlx<I, N>>,
 {
   dlx: D,
   partial_solution: Vec<usize>,
+  state: DlxExplorerState,
   _phantom: PhantomData<(I, N)>,
 }
 
@@ -944,6 +951,7 @@ where
     Self {
       dlx,
       partial_solution: Vec::new(),
+      state: DlxExplorerState::NotStarted,
       _phantom: PhantomData,
     }
   }
@@ -1019,10 +1027,12 @@ where
   fn step(&mut self) -> DlxStepResult<'_> {
     // This should only be false the very first call to `next()`, or if
     // `next()` is called after `None` is returned at the end of iteration.
-    if !self.partial_solution.is_empty() {
+    if matches!(self.state, DlxExplorerState::Started) {
       if let ExploreNextChoiceResult::Done = self.explore_next_choice() {
         return DlxStepResult::Done;
       }
+    } else {
+      self.state = DlxExplorerState::Started;
     }
 
     if let ChooseNextItemResult::FoundSolution = self.choose_next_item() {
@@ -1350,14 +1360,14 @@ mod test {
 
   use super::{Dlx, HeaderType};
 
-  #[test]
+  #[gtest]
   fn test_empty() {
     let mut dlx: Dlx<u32, u32> = Dlx::new::<_, _, Vec<_>, u32>(vec![], vec![]);
 
-    assert!(dlx
-      .find_solutions()
-      .next()
-      .is_some_and(|solution| solution.eq(&vec![])));
+    assert_that!(
+      dlx.find_solutions().collect_vec(),
+      elements_are![eq(&vec![])]
+    );
   }
 
   #[test]
